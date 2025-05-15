@@ -129,4 +129,4 @@ def chat():
             return jsonify({"response": "Error: something went wrong or information not available. Please consult a doctor directly."})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5005)
+    app.run(debug=True)
