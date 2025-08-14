@@ -4,12 +4,14 @@ import google.generativeai as genai
 from flask_cors import CORS
 
 # Configure the generative AI with the API key
-os.environ['API_KEY'] = 'AIzaSyDnuVGvYRrjqTWIiMqyvbETaimn-H_ZJjE'
-genai.configure(api_key=os.environ['API_KEY'])
+api_key = os.environ.get('API_KEY', 'AIzaSyDnuVGvYRrjqTWIiMqyvbETaimn-H_ZJjE')
+genai.configure(api_key=api_key)
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], 
+     methods=["GET", "POST"], 
+     allow_headers=["Content-Type", "Authorization"])
 
 # Conversation context
 conversation_context = {}
@@ -41,116 +43,127 @@ def is_similar(new_question, asked_questions):
 @app.route('/chat', methods=['POST'])
 def chat():
     global conversation_context
-    data = request.json
-    user_input = data.get('message', '').strip()
-    doctor_type = data.get('doctorType', 'general')
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        user_input = data.get('message', '').strip()
+        doctor_type = data.get('doctorType', 'general')
 
-    if not user_input:
-        return jsonify({"response": "Please enter a message."})
+        if not user_input:
+            return jsonify({"response": "Please enter a message."})
 
-    # Store doctor type in context
-    if "doctor_type" not in conversation_context:
-        conversation_context["doctor_type"] = doctor_type
+        # Store doctor type in context
+        if "doctor_type" not in conversation_context:
+            conversation_context["doctor_type"] = doctor_type
 
-    # Initial setup for user details
-    if "step" not in conversation_context:
-        conversation_context["step"] = "ask_name"
-        role_intro = DOCTOR_ROLES.get(doctor_type, DOCTOR_ROLES["general"])
-        return jsonify({"response": f"Hello! I am your AI {doctor_type.title()} specialist. {role_intro} What's your name?"})
+        # Initial setup for user details
+        if "step" not in conversation_context:
+            conversation_context["step"] = "ask_name"
+            role_intro = DOCTOR_ROLES.get(doctor_type, DOCTOR_ROLES["general"])
+            return jsonify({"response": f"Hello! I am your AI {doctor_type.title()} specialist. {role_intro} What's your name?"})
 
-    elif conversation_context["step"] == "ask_name":
-        conversation_context["name"] = user_input
-        conversation_context["step"] = "ask_age"
-        return jsonify({"response": f"Hello {user_input}, what's your age?"})
+        elif conversation_context["step"] == "ask_name":
+            conversation_context["name"] = user_input
+            conversation_context["step"] = "ask_age"
+            return jsonify({"response": f"Hello {user_input}, what's your age?"})
 
-    elif conversation_context["step"] == "ask_age":
-        conversation_context["age"] = user_input
-        conversation_context["step"] = "ask_address"
-        return jsonify({"response": "Could you tell me your location/address?"})
+        elif conversation_context["step"] == "ask_age":
+            conversation_context["age"] = user_input
+            conversation_context["step"] = "ask_address"
+            return jsonify({"response": "Could you tell me your location/address?"})
 
-    elif conversation_context["step"] == "ask_address":
-        conversation_context["address"] = user_input
-        conversation_context["step"] = "ask_symptoms"
-        return jsonify({"response": "Please describe the symptoms or health concerns you are experiencing?"})
+        elif conversation_context["step"] == "ask_address":
+            conversation_context["address"] = user_input
+            conversation_context["step"] = "ask_symptoms"
+            return jsonify({"response": "Please describe the symptoms or health concerns you are experiencing?"})
 
-    elif conversation_context["step"] == "ask_symptoms":
-        conversation_context["symptoms"] = user_input
-        conversation_context["step"] = "ask_questions"
-        conversation_context["questions_asked"] = 0
-        conversation_context["responses"] = {}
-        conversation_context["asked_questions"] = []
-        return jsonify({"response": "I understand. Let me ask you a few more specific questions to provide you with the best possible assessment."})
+        elif conversation_context["step"] == "ask_symptoms":
+            conversation_context["symptoms"] = user_input
+            conversation_context["step"] = "ask_questions"
+            conversation_context["questions_asked"] = 0
+            conversation_context["responses"] = {}
+            conversation_context["asked_questions"] = []
+            return jsonify({"response": "I understand. Let me ask you a few more specific questions to provide you with the best possible assessment."})
 
-    elif conversation_context["step"] == "ask_questions":
-        # Store the user's response to the last question
-        if conversation_context["questions_asked"] > 0:
-            conversation_context["responses"][f"question_{conversation_context['questions_asked']}"] = user_input
+        elif conversation_context["step"] == "ask_questions":
+            # Store the user's response to the last question
+            if conversation_context["questions_asked"] > 0:
+                conversation_context["responses"][f"question_{conversation_context['questions_asked']}"] = user_input
 
-        if conversation_context["questions_asked"] < 3:
-            conversation_context["questions_asked"] += 1
+            if conversation_context["questions_asked"] < 3:
+                conversation_context["questions_asked"] += 1
+                try:
+                    doctor_role = DOCTOR_ROLES.get(conversation_context["doctor_type"], DOCTOR_ROLES["general"])
+                    user_prompt = (
+                        f"{doctor_role} "
+                        f"The patient reported these symptoms: {conversation_context['symptoms']}. "
+                        f"Ask ONE specific, clear follow-up question to gather more diagnostic information. "
+                        f"Keep it professional and concise. "
+                        f"Avoid asking questions similar to these already asked: {conversation_context['asked_questions']}. "
+                        f"Focus on {conversation_context['doctor_type']} specialty areas."
+                    )
+
+                    while True:
+                        response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(user_prompt)
+                        question = response.text.strip()
+                        if not is_similar(question, conversation_context["asked_questions"]):
+                            conversation_context["asked_questions"].append(question)
+                            return jsonify({"response": question})
+                except Exception as e:
+                    print(f"AI Generation Error: {str(e)}")
+                    return jsonify({"response": "I'm having trouble generating the next question. Could you provide more details about your symptoms or any specific concerns you have?"})
+
+            else:
+                conversation_context["step"] = "final_response"
+                return jsonify({"response": "Thank you for providing all the information. Let me analyze your symptoms and provide you with a comprehensive assessment."})
+
+        elif conversation_context["step"] == "final_response":
             try:
                 doctor_role = DOCTOR_ROLES.get(conversation_context["doctor_type"], DOCTOR_ROLES["general"])
                 user_prompt = (
                     f"{doctor_role} "
-                    f"The patient reported these symptoms: {conversation_context['symptoms']}. "
-                    f"Ask ONE specific, clear follow-up question to gather more diagnostic information. "
-                    f"Keep it professional and concise. "
-                    f"Avoid asking questions similar to these already asked: {conversation_context['asked_questions']}. "
-                    f"Focus on {conversation_context['doctor_type']} specialty areas."
+                    f"Patient Details - Name: {conversation_context['name']}, Age: {conversation_context['age']}, "
+                    f"Location: {conversation_context['address']}. "
+                    f"Primary Symptoms: {conversation_context['symptoms']}. "
+                    f"Additional Information: {conversation_context['responses']}. "
+                    f"As a {conversation_context['doctor_type']} specialist, provide a professional assessment with: "
+                    f"1. **Possible Diagnosis**: Brief assessment based on symptoms "
+                    f"2. **Recommended Treatment**: Professional recommendations "
+                    f"3. **Important Precautions**: Key safety measures "
+                    f"4. **Next Steps**: When to seek immediate care "
+                    f"Keep the response professional, clear, and within your {conversation_context['doctor_type']} specialty."
                 )
+                
+                response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(user_prompt)
+                
+                # Get nearby hospitals
+                hospitals_prompt = f"List 3-5 reputable hospitals or medical centers near {conversation_context['address']} that have {conversation_context['doctor_type']} specialists."
+                try:
+                    hospitals_response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(hospitals_prompt)
+                    hospitals_text = hospitals_response.text
+                except Exception as e:
+                    hospitals_text = "Please consult your local medical directory for nearby healthcare facilities."
 
-                while True:
-                    response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(user_prompt)
-                    question = response.text.strip()
-                    if not is_similar(question, conversation_context["asked_questions"]):
-                        conversation_context["asked_questions"].append(question)
-                        return jsonify({"response": question})
+                final_response = response.text.replace("**", "")
+                final_response += f"\n\n**Recommended Healthcare Facilities:**\n{hospitals_text}"
+                final_response += f"\n\n**Disclaimer:** This assessment is for informational purposes only. Please consult with a qualified healthcare professional for proper diagnosis and treatment."
+                final_response += f"\n\nThank you for using our AI {conversation_context['doctor_type'].title()} consultation service. Take care!"
+
+                # Reset conversation
+                conversation_context = {}
+                return jsonify({"response": final_response})
+                
             except Exception as e:
-                return jsonify({"response": "I couldn't generate the next question. Please provide more details about your symptoms."})
+                print(f"Final Response Error: {str(e)}")
+                conversation_context = {}
+                return jsonify({"response": "I apologize, but I'm experiencing technical difficulties. Please consult with a healthcare professional directly for proper medical advice. You may also try starting a new consultation."})
 
-        else:
-            conversation_context["step"] = "final_response"
-            return jsonify({"response": "Thank you for providing all the information. Let me analyze your symptoms and provide you with a comprehensive assessment."})
-
-    elif conversation_context["step"] == "final_response":
-        try:
-            doctor_role = DOCTOR_ROLES.get(conversation_context["doctor_type"], DOCTOR_ROLES["general"])
-            user_prompt = (
-                f"{doctor_role} "
-                f"Patient Details - Name: {conversation_context['name']}, Age: {conversation_context['age']}, "
-                f"Location: {conversation_context['address']}. "
-                f"Primary Symptoms: {conversation_context['symptoms']}. "
-                f"Additional Information: {conversation_context['responses']}. "
-                f"As a {conversation_context['doctor_type']} specialist, provide a professional assessment with: "
-                f"1. **Possible Diagnosis**: Brief assessment based on symptoms "
-                f"2. **Recommended Treatment**: Professional recommendations "
-                f"3. **Important Precautions**: Key safety measures "
-                f"4. **Next Steps**: When to seek immediate care "
-                f"Keep the response professional, clear, and within your {conversation_context['doctor_type']} specialty."
-            )
-            
-            response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(user_prompt)
-            
-            # Get nearby hospitals
-            hospitals_prompt = f"List 3-5 reputable hospitals or medical centers near {conversation_context['address']} that have {conversation_context['doctor_type']} specialists."
-            try:
-                hospitals_response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(hospitals_prompt)
-                hospitals_text = hospitals_response.text
-            except Exception as e:
-                hospitals_text = "Please consult your local medical directory for nearby healthcare facilities."
-
-            final_response = response.text.replace("**", "")
-            final_response += f"\n\n**Recommended Healthcare Facilities:**\n{hospitals_text}"
-            final_response += f"\n\n**Disclaimer:** This assessment is for informational purposes only. Please consult with a qualified healthcare professional for proper diagnosis and treatment."
-            final_response += f"\n\nThank you for using our AI {conversation_context['doctor_type'].title()} consultation service. Take care!"
-
-            # Reset conversation
-            conversation_context = {}
-            return jsonify({"response": final_response})
-            
-        except Exception as e:
-            conversation_context = {}
-            return jsonify({"response": "I apologize, but I encountered an error processing your information. Please consult with a healthcare professional directly for proper medical advice."})
+    except Exception as e:
+        print(f"Server Error: {str(e)}")
+        return jsonify({"error": "Server error occurred. Please try again."}), 500
 
 @app.route('/reset', methods=['POST'])
 def reset_conversation():
@@ -158,5 +171,9 @@ def reset_conversation():
     conversation_context = {}
     return jsonify({"status": "reset"})
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy", "message": "Server is running"})
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
