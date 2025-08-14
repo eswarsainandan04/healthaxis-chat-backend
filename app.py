@@ -124,16 +124,14 @@ def chat():
                 doctor_role = DOCTOR_ROLES.get(conversation_context["doctor_type"], DOCTOR_ROLES["general"])
                 user_prompt = (
                     f"{doctor_role} "
-                    f"Patient Details - Name: {conversation_context['name']}, Age: {conversation_context['age']}, "
-                    f"Location: {conversation_context['address']}. "
-                    f"Primary Symptoms: {conversation_context['symptoms']}. "
-                    f"Additional Information: {conversation_context['responses']}. "
-                    f"As a {conversation_context['doctor_type']} specialist, provide a professional assessment with: "
-                    f"1. **Possible Diagnosis**: Brief assessment based on symptoms "
-                    f"2. **Recommended Treatment**: Professional recommendations "
-                    f"3. **Important Precautions**: Key safety measures "
-                    f"4. **Next Steps**: When to seek immediate care "
-                    f"Keep the response professional, clear, and within your {conversation_context['doctor_type']} specialty."
+                    f"Based on Name: {conversation_context['name']}, Age: {conversation_context['age']}, "
+                    f"Address: {conversation_context['address']}. Symptoms: {conversation_context['symptoms']}. "
+                    f"Responses to follow-up questions: {conversation_context['responses']}. "
+                    "Provide a very short summary with the following sections: "
+                    "1. **Likely Diagnosis**: (brief diagnosis) "
+                    "2. **Medical Prescription**: (brief prescription) "
+                    "3. **Precautions**: (brief precautions) "
+                    "4. **Hospitals to Visit**: (list 5 hospitals near the address) "
                 )
                 
                 response = genai.GenerativeModel("gemini-2.0-flash-exp").generate_content(user_prompt)
