@@ -9,9 +9,8 @@ genai.configure(api_key=api_key)
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], 
-     methods=["GET", "POST"], 
-     allow_headers=["Content-Type", "Authorization"])
+CORS(app)
+
 
 # Conversation context
 conversation_context = {}
@@ -176,4 +175,4 @@ def health_check():
     return jsonify({"status": "healthy", "message": "Server is running"})
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
